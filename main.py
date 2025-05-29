@@ -1,11 +1,15 @@
+import random
 import pygetwindow as gw
 import time
 import mss
 from PIL import Image
 import pyautogui
+import keyboard 
+import sys
 
 cols, rows, width, height  = (None, None, None, None)
 grid_area = None
+grid = None
 
 def is_grid_border_color(pixel, tolerance=1):
     """Check if pixel matches grid border color (gray) with tolerance"""
@@ -126,47 +130,57 @@ def click(x, y, grid_area, r_click=False):
     pyautogui.rightClick() if r_click else pyautogui.click()
 
 def detect_grid_size(img):
-    global width, height  # Make width and height global
+    global width, height 
     pixels = img.load()
-    width, height = img.size  # Set global width and height
+    width, height = img.size 
 
-    # Find top-left cell color
     base_color = pixels[0, 0]
 
-    # Find cell width: count pixels to first color change in row 0
     cell_w = 1
     for dx in range(1, width):
         if pixels[dx, 0] != base_color:
             break
         cell_w += 1
 
-    # Find cell height: count pixels to first color change in column 0
     cell_h = 1
     for dy in range(1, height):
         if pixels[0, dy] != base_color:
             break
         cell_h += 1
 
-    # Calculate columns and rows by dividing total size by cell size
     cols = width // cell_w
     rows = height // cell_h
 
     return cols, rows
 
-def get_number_from_color(pixel):
-    # These RGB values are from numbers123.png (with alpha channel)
-    color_map = {
-        (109, 147, 184): '1',   # blue (from your new screenshot)
-        (56,142,60): '2',  # green (from your new screenshot)
-        (211, 47, 47): '3',    # red (from your new screenshot)
-    }
-    rgb = pixel[:3] if len(pixel) == 4 else pixel  # Ignore alpha if present
-    for color, number in color_map.items():
-        if all(abs(rgb[i] - color[i]) < 40 for i in range(3)):
-            return number
-    return 'O'  # Opened or flagged, not a number
+def get_neighboring_cells(x, y, cols, rows):
+    neighbors = []
+    offsets = [(-1, -1), (-1, 0), (-1, 1),
+               (0, -1),         (0, 1),
+               (1, -1), (1, 0), (1, 1)]  # All directions
 
-def read_grid():
+    for dx, dy in offsets:
+        nx, ny = x + dx, y + dy  # Neighbor coordinates
+        if 0 <= nx < cols and 0 <= ny < rows:  # Check bounds
+            neighbors.append((nx, ny))  # Append valid coordinates
+
+    return neighbors
+
+def get_number_from_color(pixel, tolerance=100):
+
+    color_map = {
+        (25, 118, 210): '1',
+        (56, 142, 60): '2',
+        (211, 47, 47): '3',
+        (123,31,162): '4',
+    }
+    rgb = pixel[:3] if len(pixel) == 4 else pixel 
+    for color, number in color_map.items():
+        if all(abs(rgb[i] - color[i]) <= tolerance for i in range(3)):
+            return number
+    return '□'
+
+def read_grid(flagged_positions=None):
     """Read the Minesweeper grid from the screenshot and detect numbers by color"""
     img = Image.open("screenshot.png")
     pixels = img.load()
@@ -179,29 +193,49 @@ def read_grid():
             cell_color = pixels[x * width // cols + width // (2 * cols), 
                                 y * height // rows + height // (2 * rows)]
             if is_unopened_cell_color(cell_color):
-                row.append('U')  # Unopened
-            elif is_grid_border_color(cell_color):
-                row.append('B')  # Border
+                row.append('■')
             else:
                 row.append(get_number_from_color(cell_color))
         grid.append(row)
-    # Print the grid in a readable format
+    
+    if flagged_positions:
+        for x, y in flagged_positions:
+            grid[y][x] = 'B'
+    
     print("Current Minesweeper grid:")
     for row in grid:
         print(' '.join(row))
     return grid
 
+def read_all_numbers():
+    numbers = []
+    for y in range(rows):
+        for x in range(cols):
+            if grid[y][x].isdigit():
+                numbers.append((x, y))
+
+    for x, y in numbers:
+        if grid[y][x].isdigit():
+            neighboring_cells = get_neighboring_cells(x, y, cols, rows)
+            # print(f"Neighboring cells for position ({x}, {y}): {[(nx, ny, grid[ny][nx]) for nx, ny in neighboring_cells]}")
+
+            
+
 if __name__ == '__main__':
-    try:
-        screenshot = read_screen()
-        img = Image.open("screenshot.png")
-        cols, rows = detect_grid_size(img)
-        
-        print(f"Grid size: {cols} columns x {rows} rows")
-        click(3, 3, grid_area)
-        time.sleep(1)
-        capture_screenshot()
-        img = Image.open("screenshot.png")
-        grid = read_grid()
-    except Exception as e:
-        print(f"Error: {str(e)}")
+
+    screenshot = read_screen()
+    img = Image.open("screenshot.png")
+    cols, rows = detect_grid_size(img)
+    
+    print(f"Grid size: {cols} columns x {rows} rows")
+    
+    click(random.randint(0, cols-1), random.randint(0, rows-1), grid_area)
+    time.sleep(1) 
+    
+    flagged_positions = set()
+            
+    capture_screenshot()
+    img = Image.open("screenshot.png")
+    grid = read_grid(flagged_positions)
+    
+    read_all_numbers()
